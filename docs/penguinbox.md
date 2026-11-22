@@ -111,7 +111,7 @@ The guest host key is recorded on first use in `storage/penguinbox/known_hosts` 
 ### Custom rules
 
 - **Static YARA (`/etc/penguinbox/rules/yara`):** `penguinboxd` evaluates every `.yar` and `.yara` file against uploaded artifacts and returns matches under `results.yara.matches`. Sample: `guest/rules/yara/penguinbox.yar`.
-- **Behavioral Falco (`/etc/penguinbox/rules/falco`):** Falco includes and watches this directory. Matching alerts appear in `findings.events` with `collector=falco` and the rule name. Sample: `guest/rules/falco/penguinbox-custom.yaml`.
+- **Behavioral Falco (`/etc/penguinbox/rules/falco`):** Falco includes and watches this directory. Matching alerts appear in `findings.events` with `collector=falco` and the rule name. Ships with `guest/rules/falco/penguinbox-custom.yaml` and the upstream Apache-2.0 `falcosecurity/rules` incubating (`falco-incubating_rules.yaml`, `falco-incubating-rules-6.0.1`) and sandbox (`falco-sandbox_rules.yaml`, `falco-sandbox-rules-6.2.0`) rulesets.
 
 Add or replace files in the guest rule directories; no image rebuild is needed.
 
