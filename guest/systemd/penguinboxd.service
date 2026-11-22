@@ -1,0 +1,20 @@
+[Unit]
+Description=PenguinBox LitterBox-compatible sandbox API
+After=network-online.target podman.socket falco-modern-bpf.service
+Wants=podman.socket
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/penguinboxd \
+    -listen 127.0.0.1:1338 \
+    -state-dir /var/lib/penguinbox \
+    -falco-log /var/log/penguinbox/falco.json \
+    -yara-rules /etc/penguinbox/rules/yara \
+    -falco-rules /etc/penguinbox/rules/falco
+Restart=on-failure
+RestartSec=3s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

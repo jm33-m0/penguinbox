@@ -1,0 +1,22 @@
+engine:
+  kind: modern_ebpf
+
+json_output: true
+json_include_output_property: true
+buffered_outputs: false
+rule_matching: all
+watch_config_files: true
+
+rules_files:
+  - /etc/falco/falco_rules.yaml
+  - /etc/falco/falco_rules.local.yaml
+  - /etc/falco/rules.d
+  - /etc/penguinbox/rules/falco
+
+file_output:
+  enabled: true
+  keep_alive: true
+  filename: /var/log/penguinbox/falco.json
+
+stdout_output:
+  enabled: true

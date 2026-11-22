@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Capture full eBPF telemetry for one PenguinBox run.
+#
+# Usage: penguinbox-tracee OUTPUT.json [tracee flags...]
+#
+# Set PENGUINBOX_CONTAINER_ID to scope the capture to one Podman container. The
+# guest runs Tracee as root; the output is JSON lines, one event per line.
+set -Eeuo pipefail
+
+if [[ $# -lt 1 ]]; then
+    echo "usage: penguinbox-tracee OUTPUT.json [tracee flags...]" >&2
+    exit 2
+fi
+
+out=$1
+shift
+
+args=(
+    --output "json:${out}"
+    --output option:parse-arguments,exec-hash
+    --events syscalls,sched_process_exec,shared_object_loaded,security_file_open,security_socket_connect
+    --capture exec
+)
+
+if [[ -S /run/podman/podman.sock ]]; then
+    args+=(--containers enrich=true)
+    args+=(--containers sockets.podman=/run/podman/podman.sock)
+fi
+
+if [[ -n "${PENGUINBOX_HOST_PID:-}" ]]; then
+    args+=(--proctree source=events)
+    args+=(--scope "tree=${PENGUINBOX_HOST_PID}")
+elif [[ -n "${PENGUINBOX_CONTAINER_ID:-}" ]]; then
+    args+=(--scope "container=${PENGUINBOX_CONTAINER_ID}")
+fi
+
+exec /usr/local/bin/tracee "${args[@]}" "$@"

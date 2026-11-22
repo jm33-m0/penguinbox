@@ -1,0 +1,14 @@
+/storage/
+/penguinboxd
+/coverage.out
+/coverage.txt
+/coverage.html
+*.log
+*.tmp
+*.swp
+*.qcow2
+*.img
+*.iso
+.DS_Store
+.idea/
+.vscode/

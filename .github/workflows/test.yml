@@ -1,0 +1,65 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Go and image checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+
+      - name: Unit tests
+        run: go test ./...
+
+      - name: Race tests
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Compile e2e tests
+        run: go test -tags=e2e ./test/e2e -run '^$'
+
+      - name: Format check
+        run: test -z "$(gofmt -l cmd test)"
+
+      - name: Shell syntax check
+        run: |
+          bash -n entrypoint.sh run.sh reset.sh snapshot.sh tunnel.sh guest/provision.sh guest/bin/penguinbox-tracee
+
+      - name: Build container image
+        run: docker build -t penguinbox:ci .
+
+  e2e:
+    name: KVM end-to-end
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, kvm]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: false
+
+      - name: Run sandbox e2e
+        env:
+          PENGUINBOX_E2E_RESET: "1"
+          PENGUINBOX_E2E_KEEP: "0"
+        run: go test -tags=e2e ./test/e2e -v -timeout 30m

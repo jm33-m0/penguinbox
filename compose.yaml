@@ -1,0 +1,33 @@
+name: penguinbox
+
+services:
+  penguinbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: localhost/penguinbox:latest
+    container_name: penguinbox
+    devices:
+      - /dev/kvm:/dev/kvm
+    ports:
+      - "127.0.0.1:${HOST_SSH_PORT:-2223}:2222"
+      - "127.0.0.1:${HOST_WEB_PORT:-8007}:8006"
+      - "127.0.0.1:${HOST_API_PORT:-1338}:1338"
+    environment:
+      VM_NAME: penguinbox
+      VM_DISK_SIZE: "${VM_DISK_SIZE:-40G}"
+      RAM_SIZE: "${RAM_SIZE:-4G}"
+      CPU_CORES: "${CPU_CORES:-4}"
+      SSH_PORT: "2222"
+      WEB_PORT: "8006"
+      HOST_SSH_PORT: "${HOST_SSH_PORT:-2223}"
+      HOST_WEB_PORT: "${HOST_WEB_PORT:-8007}"
+      HOST_API_PORT: "${HOST_API_PORT:-1338}"
+      ENABLE_VNC: "${ENABLE_VNC:-1}"
+      GUEST_RESTRICT_NET: "${GUEST_RESTRICT_NET:-0}"
+      SSH_PUBLIC_KEY: "${SSH_PUBLIC_KEY:-}"
+      RESET: "${RESET:-0}"
+    volumes:
+      - ./storage:/storage:z
+    stop_grace_period: 1m
+    restart: unless-stopped

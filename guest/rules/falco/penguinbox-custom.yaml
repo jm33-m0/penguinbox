@@ -1,0 +1,20 @@
+- rule: PenguinBox payload executed from mount
+  desc: A payload was executed from the read-only mount inside the sandbox container.
+  condition: evt.type in (execve, execveat) and container.id != host and proc.exepath startswith /payload
+  output: "custom payload exec container_id=%container.id pid=%proc.pid proc=%proc.name exe=%proc.exepath"
+  priority: NOTICE
+  tags: [penguinbox, custom]
+
+- rule: PenguinBox custom memfd create
+  desc: A payload created an anonymous file descriptor.
+  condition: evt.type=memfd_create and container.id != host
+  output: "custom memfd container_id=%container.id pid=%proc.pid proc=%proc.name"
+  priority: WARNING
+  tags: [penguinbox, custom, memory]
+
+- rule: PenguinBox custom proc maps read
+  desc: A payload read a process memory map.
+  condition: evt.type in (open, openat, openat2) and container.id != host and fd.name contains "/proc/" and fd.name endswith "/maps"
+  output: "custom proc maps container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name"
+  priority: NOTICE
+  tags: [penguinbox, custom, discovery]
