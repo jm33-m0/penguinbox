@@ -296,6 +296,9 @@ func ensureBox(t *testing.T, root string) bool {
 		exists = false
 	}
 	if !exists {
+		if err := os.MkdirAll(filepath.Join(root, "storage"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		run(t, root, "podman", "run", "-d", "--name", containerName,
 			"--device", "/dev/kvm",
 			"-p", "127.0.0.1:2223:2222",

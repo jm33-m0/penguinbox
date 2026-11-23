@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")"
 
+mkdir -p storage
+
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
     podman build -t localhost/penguinbox:latest .
 fi
