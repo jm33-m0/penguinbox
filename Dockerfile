@@ -1,4 +1,4 @@
-FROM golang:1.25-bookworm AS penguinboxd
+FROM golang:1.26-trixie AS penguinboxd
 
 WORKDIR /src
 COPY go.mod ./
@@ -7,7 +7,7 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags '-s -w' -o /out/penguinboxd ./cmd/penguinboxd
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
