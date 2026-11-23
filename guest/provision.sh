@@ -10,14 +10,28 @@ mkdir -p /var/log/penguinbox /opt/penguinbox /usr/local/bin
 
 exec > >(tee -a /var/log/penguinbox/provision.log) 2>&1
 
-echo "penguinbox: mounting host share"
+# Progress goes to the VNC/serial console as well as the log. Without this a
+# multi-minute first boot looks hung at a login prompt with no API or guest
+# telemetry, and a failed step is invisible.
+say() {
+    printf 'penguinbox: %s\n' "$*"
+    printf '\n[penguinbox] %s\n' "$*" >/dev/tty1 2>/dev/null || true
+    # /dev/console is the serial console; entrypoint.sh follows console.log
+    # and mirrors these lines into `podman logs`.
+    printf '\n[penguinbox] %s\n' "$*" >/dev/console 2>/dev/null || true
+}
+trap 'rc=$?; say "provisioning failed (exit $rc) at line $LINENO; see /var/log/penguinbox/provision.log"; exit "$rc"' ERR
+
+say "mounting host share"
 mkdir -p "$SHARE"
 if ! mountpoint -q "$SHARE"; then
-    mount -t 9p -o ro,trans=virtio,version=9p2000.L,msize=104857600 host0 "$SHARE" || true
+    mount -t 9p -o ro,trans=virtio,version=9p2000.L,msize=104857600 host0 "$SHARE"
 fi
-if [[ -d "$GUEST_SRC" ]]; then
-    cp -a "$GUEST_SRC"/. /opt/penguinbox/
+if [[ ! -d "$GUEST_SRC" ]]; then
+    say "guest share is not mounted at $SHARE; cannot install penguinboxd"
+    exit 1
 fi
+cp -a "$GUEST_SRC"/. /opt/penguinbox/
 
 if ! grep -q '^host0 /mnt/penguinbox ' /etc/fstab; then
     printf 'host0 /mnt/penguinbox 9p ro,trans=virtio,version=9p2000.L,msize=104857600,nofail 0 0\n' >>/etc/fstab
@@ -25,7 +39,17 @@ fi
 systemctl daemon-reload
 mount -a || true
 
-echo "penguinbox: installing base tools"
+# Serve /health while the package install and payload build run, so the
+# published API port answers instead of resetting connections for minutes.
+say "installing early sandbox API"
+install -d -m 0700 /var/lib/penguinbox
+install -m 0755 /opt/penguinbox/bin/penguinboxd /usr/local/bin/penguinboxd
+install -m 0644 /opt/penguinbox/systemd/penguinboxd.service /etc/systemd/system/penguinboxd.service
+systemctl daemon-reload
+systemctl enable --now penguinboxd.service ||
+    say "warning: sandbox API did not start; it is retried after provisioning"
+
+say "installing base tools"
 apt-get update
 apt-get install -y --no-install-recommends \
     apt-transport-https \
@@ -71,11 +95,11 @@ apt-get install -y --no-install-recommends \
     yara \
     zstd
 
-echo "penguinbox: enabling podman"
+say "enabling podman"
 systemctl enable --now podman.socket
 systemctl enable --now ssh
 
-echo "penguinbox: installing falco"
+say "installing falco"
 install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://falco.org/repo/falcosecurity-packages.asc |
     gpg --batch --yes --dearmor -o /etc/apt/keyrings/falcosecurity.gpg
@@ -133,9 +157,9 @@ fi
 systemctl is-active falco-modern-bpf.service >/dev/null 2>&1 ||
     systemctl is-active falco.service >/dev/null 2>&1 ||
     systemctl is-active penguinbox-falco.service >/dev/null 2>&1 ||
-    echo "penguinbox: warning: falco is not active; inspect journalctl -u falco-modern-bpf"
+    say "warning: falco is not active; inspect journalctl -u falco-modern-bpf"
 
-echo "penguinbox: installing tracee"
+say "installing tracee"
 TRACEE_VERSION=v0.24.1
 TRACEE_TARBALL="tracee-x86_64.${TRACEE_VERSION}.tar.gz"
 TRACEE_BASE="https://github.com/aquasecurity/tracee/releases/download/${TRACEE_VERSION}"
@@ -157,7 +181,7 @@ tar -xzf "$tmpdir/$TRACEE_TARBALL" -C "$tmpdir"
 install -m 0755 "$tmpdir/dist/tracee" /usr/local/bin/tracee
 install -m 0755 /opt/penguinbox/bin/penguinbox-tracee /usr/local/bin/penguinbox-tracee
 
-echo "penguinbox: building payload runtime image"
+say "building payload runtime image"
 install -d -m 0755 /opt/penguinbox/payload
 if [[ ! -f /opt/penguinbox/payload/Containerfile ]]; then
     echo "penguinbox: payload Containerfile is missing from the guest share" >&2
@@ -165,7 +189,7 @@ if [[ ! -f /opt/penguinbox/payload/Containerfile ]]; then
 fi
 podman build -t localhost/penguinbox-payload:latest -f /opt/penguinbox/payload/Containerfile /opt/penguinbox/payload
 
-echo "penguinbox: installing sandbox API"
+say "installing sandbox API"
 install -d -m 0700 /var/lib/penguinbox
 if [[ ! -f /opt/penguinbox/bin/penguinboxd ]]; then
     echo "penguinbox: penguinboxd binary is missing from the guest share" >&2
@@ -180,4 +204,4 @@ systemctl restart penguinboxd.service
 systemctl enable --now auditd || true
 
 touch /var/lib/penguinbox-provisioned
-echo "penguinbox: provisioning complete"
+say "provisioning complete"

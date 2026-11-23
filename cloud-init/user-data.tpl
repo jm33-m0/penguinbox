@@ -10,9 +10,16 @@ users:
     groups: [adm, sudo]
     sudo: "ALL=(ALL) NOPASSWD:ALL"
     shell: /bin/bash
-    lock_passwd: true
+    lock_passwd: false
     ssh_authorized_keys:
       - __SSH_PUBLIC_KEY__
+# Console (VNC and serial) password login. cloud-init hashes the plaintext.
+# SSH password authentication stays disabled, so this only unlocks the local
+# console for debugging a guest whose API or provisioning failed.
+chpasswd:
+  expire: false
+  list: |
+    penguinbox:__CONSOLE_PASSWORD__
 ssh_pwauth: false
 ssh_deletekeys: false
 disable_root: true

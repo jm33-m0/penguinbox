@@ -34,6 +34,7 @@ args=(
     -e "ENABLE_VNC=${ENABLE_VNC:-1}"
     -e "GUEST_RESTRICT_NET=${GUEST_RESTRICT_NET:-0}"
     -e "SSH_PUBLIC_KEY=${SSH_PUBLIC_KEY:-}"
+    -e "CONSOLE_PASSWORD=${CONSOLE_PASSWORD:-penguinbox}"
     -e "RESET=${RESET:-0}"
     -v "$(pwd)/storage:/storage:z"
 )

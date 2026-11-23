@@ -45,10 +45,10 @@ Hardening options:
 2. It creates `storage/penguinbox/disk.qcow2` as a qcow2 overlay and builds a NoCloud seed ISO with the `penguinbox` user, SSH key, and provisioning script. Every container start writes a fresh `instance-id`, so cloud-init reapplies the seed on a reused disk instead of skipping a first-boot module that was interrupted.
 3. `entrypoint.sh` starts `passt` and boots QEMU with KVM (falling back to TCG if `/dev/kvm` is unavailable).
 4. Cloud-init writes `/opt/penguinbox/provision.sh` and a `penguinbox-provision.service` supervisor, then enables and starts it.
-5. `provision.sh` installs Podman, Falco, Tracee, debug tools, builds `localhost/penguinbox-payload:latest`, installs `/usr/local/bin/penguinboxd`, and starts `penguinboxd.service`.
+5. `provision.sh` installs `penguinboxd` and starts `penguinboxd.service` before the long package install, then installs Podman, Falco, Tracee, debug tools, and builds `localhost/penguinbox-payload:latest`.
 6. The guest writes `/var/lib/penguinbox-provisioned` when provisioning finishes.
 
-The API is not reachable until step 6 completes; first boot downloads packages and builds the payload image. `penguinbox-provision.service` has `ConditionPathExists=!/var/lib/penguinbox-provisioned`, so it reruns on every boot (and restarts every 60 seconds while failing) until the marker exists. If the VM is stopped or the container is replaced while provisioning is still running, the next boot resumes it instead of leaving the guest without an API.
+`/health` answers as soon as step 5 starts; its `issues` list names the tools that are still missing until provisioning completes. Each phase and any failure is echoed to the guest console (noVNC and serial), so a slow first boot is visible instead of looking hung. `penguinbox-provision.service` has `ConditionPathExists=!/var/lib/penguinbox-provisioned`, so it reruns on every boot (and restarts every 60 seconds while failing) until the marker exists. If the VM is stopped or the container is replaced while provisioning is still running, the next boot resumes it instead of leaving the guest without an API.
 
 To rerun provisioning manually inside the guest:
 
@@ -61,7 +61,7 @@ Provisioning logs are written to `/var/log/penguinbox/provision.log` and `journa
 
 ## Network
 
-Guest networking uses `passt` inside the container network namespace, so guest traffic uses the container's IPv4 address and reaches the same network peers as the container.
+Guest networking uses `passt` inside the container network namespace. The guest receives a distinct address in the container subnet (host address `2`, or `3` if the container already uses `2`) with gateway `1` (`254` if the container uses `1`); passt proxies its traffic out through the container address, so the guest reaches the same network peers as the container. Do not reuse the container's own address for the guest: duplicate addressing breaks ARP and routing for both sides.
 
 | Host | Container | Guest | Service |
 | --- | --- | --- | --- |
@@ -87,10 +87,20 @@ A payload connecting to `host.containers.internal:<port>` therefore reaches the 
 
 On first start, `entrypoint.sh` generates an ed25519 key pair at `storage/penguinbox/ssh/id_ed25519` and authorizes its public key for the `penguinbox` user. The key is reused across restarts and preserved by `reset.sh`. Set `SSH_PUBLIC_KEY` to authorize a custom public key instead.
 
-SSH is public-key only (password login, root login, and agent forwarding are disabled):
+SSH is public-key only (password login and root login are disabled); the path in the entrypoint log is host-relative:
 
 ```sh
 ssh -i storage/penguinbox/ssh/id_ed25519 -p 2223 penguinbox@127.0.0.1
+```
+
+### Console login
+
+The `penguinbox` user has a console password for the noVNC and serial consoles. The default is `penguinbox`; set `CONSOLE_PASSWORD` to change it. Password authentication is not enabled for SSH, so this only unlocks the local console.
+
+Provisioning progress and failures are printed on the guest console (`/dev/tty1` for noVNC and the serial log). Filter the full log with:
+
+```sh
+grep '\[penguinbox\]' storage/penguinbox/console.log
 ```
 
 The guest host key is recorded on first use in `storage/penguinbox/known_hosts` and fails closed on mismatch. `reset.sh` and `RESET=1` remove `known_hosts` because the recreated guest generates a new host key. Override the default paths with `PENGUINBOX_SSH_KEY` and `PENGUINBOX_KNOWN_HOSTS`.
@@ -168,6 +178,7 @@ The Falco log records alerts across all containers in the VM; `penguinboxd` filt
 | `ENABLE_VNC` | `1` | Set to `0` to disable VNC and noVNC |
 | `GUEST_RESTRICT_NET` | `0` | Set to `1` to restrict `passt` to container loopback and disable gateway mapping |
 | `SSH_PUBLIC_KEY` | *(unset)* | Authorize a custom OpenSSH public key instead of generating one |
+| `CONSOLE_PASSWORD` | `penguinbox` | Password for the `penguinbox` user on the noVNC and serial consoles (1-64 characters: letters, digits, `. _ @ % + = -`); SSH password login stays disabled |
 | `RESET` | `0` | Set to `1` to recreate the disk overlay and clear `known_hosts` on boot |
 | `SKIP_BUILD` | `0` | Set to `1` in `run.sh` / `snapshot.sh` to skip the image build check |
 | `PENGUINBOX_IMAGE` | `localhost/penguinbox:latest` | Container image used by `run.sh` and `snapshot.sh` |

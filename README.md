@@ -23,7 +23,7 @@ Start the VM (first boot downloads the base image, provisions the guest, and gen
 
 `run.sh` builds `localhost/penguinbox:latest` only when its inputs changed (`Dockerfile`, `.dockerignore`, Go sources, `entrypoint.sh`, `cloud-init/`, `guest/`); the input hash is stored in the image label `org.penguinbox.build-inputs`. Set `SKIP_BUILD=1` to bypass the check.
 
-First boot takes several minutes (package installs and the payload image build) and runs in the foreground. The sandbox API is reachable only after guest provisioning finishes. Each container start generates a new cloud-init `instance-id`, so an interrupted first boot is reapplied on the next start instead of being skipped. Check progress with `systemctl status penguinbox-provision.service` inside the guest.
+First boot takes several minutes (package installs and the payload image build) and runs in the foreground. `penguinboxd` starts early, so `/health` answers during provisioning and lists the tools that are still missing; static and dynamic analysis become reliable only after provisioning finishes. Delivery failures appear on the guest console and in `/var/log/penguinbox/provision.log`. Each container start generates a new cloud-init `instance-id`, so an interrupted first boot is reapplied on the next start instead of being skipped. Check progress with `systemctl status penguinbox-provision.service` inside the guest.
 
 Connect over SSH:
 
@@ -32,6 +32,7 @@ ssh -i storage/penguinbox/ssh/id_ed25519 -p 2223 penguinbox@127.0.0.1
 ```
 
 - Web console: `http://127.0.0.1:8007/?autoconnect=1&resize=scale`
+- Console login: `penguinbox` / `penguinbox` (override with `CONSOLE_PASSWORD`). SSH password login stays disabled.
 - Sandbox API: `http://127.0.0.1:1338`
 
 ```sh

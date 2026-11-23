@@ -18,9 +18,16 @@ set -Eeuo pipefail
 : "${STORAGE:=/storage}"
 : "${RESET:=0}"
 : "${SSH_PUBLIC_KEY:=}"
+: "${CONSOLE_PASSWORD:=penguinbox}"
 
 if [[ ! "$VM_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$ ]]; then
     printf '[penguinbox] error: invalid VM_NAME: %s\n' "$VM_NAME" >&2
+    exit 1
+fi
+# The password is substituted into YAML cloud-init data by value, so keep it to
+# characters that cannot terminate or extend the chpasswd entry.
+if [[ ! "$CONSOLE_PASSWORD" =~ ^[A-Za-z0-9._@%+=-]{1,64}$ ]]; then
+    printf '[penguinbox] error: invalid CONSOLE_PASSWORD: use 1-64 of A-Za-z0-9._@%%+=- without spaces or colons\n' >&2
     exit 1
 fi
 
@@ -46,15 +53,17 @@ require() {
     command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
-for command in qemu-system-x86_64 qemu-img cloud-localds ssh-keygen base64 python3 passt; do
+for command in qemu-system-x86_64 qemu-img cloud-localds ssh-keygen base64 python3 passt ss; do
     require "$command"
 done
 
 # The guest network is provided by passt, not QEMU user-mode slirp. passt
 # proxies guest traffic through the container network namespace, so the guest
-# leaves with the container's address and reaches the same peers.
+# reaches the same peers as the container. The guest needs its own address in
+# the container subnet; reusing the container's address creates a duplicate
+# address and breaks ARP and routing for both sides.
 passt_addresses() {
-    local ip prefix last
+    local ip prefix net last guest gateway
     ip=$(ip -4 route get 1.1.1.1 2>/dev/null |
         awk '{ for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')
     if [[ -z "$ip" ]]; then
@@ -65,11 +74,14 @@ passt_addresses() {
     prefix=$(ip -4 -o addr show 2>/dev/null |
         awk -v ip="$ip" 'index($4, ip "/") == 1 { sub(/.*\//, "", $4); print $4; exit }')
     [[ "$prefix" =~ ^[0-9]+$ ]] || prefix=24
+    net="${ip%.*}"
     last="${ip##*.}"
-    if [[ ! "$last" =~ ^[0-9]+$ ]] || ((last < 2 || last > 253)); then
-        ip="${ip%.*}.2"
+    if [[ ! "$last" =~ ^[0-9]+$ ]]; then
+        return 1
     fi
-    printf '%s %s\n' "$ip" "$prefix"
+    if [[ "$last" == 2 ]]; then guest=3; else guest=2; fi
+    if [[ "$last" == 1 ]]; then gateway=254; else gateway=1; fi
+    printf '%s %s %s\n' "${net}.${guest}" "$prefix" "${net}.${gateway}"
 }
 
 mkdir -p "$DATA_DIR" "$SHARE_DIR" "$SSH_DIR"
@@ -154,6 +166,7 @@ PROVISION_B64=$(base64 -w0 /etc/penguinbox/guest/provision.sh)
 python3 - "$CLOUD_TEMPLATE" "$USER_DATA" \
     "HOSTNAME=$VM_NAME" \
     "SSH_PUBLIC_KEY=$SSH_PUBLIC_KEY" \
+    "CONSOLE_PASSWORD=$CONSOLE_PASSWORD" \
     "PROVISION_B64=$PROVISION_B64" <<'PY'
 import json
 import sys
@@ -187,7 +200,11 @@ if ((VNC_DISPLAY < 0)); then
 fi
 
 WS_PID=""
+PROGRESS_PID=""
 cleanup() {
+    if [[ -n "${PROGRESS_PID:-}" ]]; then
+        kill "$PROGRESS_PID" 2>/dev/null || true
+    fi
     if [[ -n "${PASST_PID:-}" ]]; then
         kill "$PASST_PID" 2>/dev/null || true
     fi
@@ -199,6 +216,54 @@ cleanup() {
     fi
 }
 trap cleanup EXIT INT TERM
+
+# /health only checks that the tools exist. The payload image is built after
+# those checks pass, so confirm the provisioning completion marker before
+# announcing readiness. Fall back to /health alone when no private key exists.
+guest_provisioned() {
+    [[ -r "$SSH_KEY" ]] || return 0
+    ssh -i "$SSH_KEY" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=3 \
+        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+        penguinbox@127.0.0.1 'test -f /var/lib/penguinbox-provisioned' 2>/dev/null
+}
+
+# Mirror guest provisioning phase lines into the container log so `run.sh` and
+# `podman logs -f` show first-boot progress instead of a silent wait. Announce
+# when provisioning has completed and /health reports no missing tools, and
+# stop on a failed run.
+guest_progress() {
+    local console="$DATA_DIR/console.log" seen=0 total line health
+    while kill -0 "$QEMU_PID" 2>/dev/null; do
+        if ! kill -0 "$PASST_PID" 2>/dev/null; then
+            printf '[penguinbox] error: passt exited; guest networking is down\n'
+            return 0
+        fi
+        if [[ -f "$console" ]]; then
+            total=$(wc -l <"$console" 2>/dev/null || printf '0')
+            if ((total > seen)); then
+                while IFS= read -r line; do
+                    line=${line%$'\r'}
+                    [[ "$line" == *"[penguinbox]"* ]] || continue
+                    line=${line#*\[penguinbox\] }
+                    printf '[penguinbox] guest: %s\n' "$line"
+                    case "$line" in
+                        provisioning\ failed*) return 0 ;;
+                    esac
+                done < <(tail -n +"$((seen + 1))" "$console" | head -n "$((total - seen))")
+                seen=$total
+            fi
+        fi
+        health=$(curl -fsS -m 2 "http://127.0.0.1:${HOST_API_PORT}/health" 2>/dev/null || true)
+        if [[ "$health" == *'"issues":[]'* ]] && guest_provisioned; then
+            printf '[penguinbox] analysis ready\n'
+            printf '[penguinbox] api:      http://127.0.0.1:%s/health\n' "$HOST_API_PORT"
+            printf '[penguinbox] console:  http://127.0.0.1:%s/?autoconnect=1&resize=scale\n' "$HOST_WEB_PORT"
+            printf '[penguinbox] ssh:      ssh -i storage/%s/ssh/id_ed25519 -p %s penguinbox@127.0.0.1\n' "$VM_NAME" "$HOST_SSH_PORT"
+            return 0
+        fi
+        sleep 3
+    done
+}
 
 display_args=(-display none)
 if [[ "$ENABLE_VNC" == "1" ]]; then
@@ -224,8 +289,7 @@ else
     log "warning: /dev/kvm is not accessible; falling back to TCG"
 fi
 
-read -r GUEST_IP GUEST_PREFIX < <(passt_addresses) || die "cannot determine the container IPv4 address"
-GUEST_GATEWAY="${GUEST_IP%.*}.1"
+read -r GUEST_IP GUEST_PREFIX GUEST_GATEWAY < <(passt_addresses) || die "cannot determine the container IPv4 network"
 UPLINK_DEV=$(ip -4 route show default 2>/dev/null |
     awk '{ for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
 GUEST_MTU=1500
@@ -261,28 +325,46 @@ if [[ "$GUEST_RESTRICT_NET" == "1" ]]; then
 fi
 
 log "network: passt guest=${GUEST_IP}/${GUEST_PREFIX} gateway=${GUEST_GATEWAY} ssh=${SSH_PORT}->22 api=1338"
-passt "${passt_args[@]}" &
+passt_supervise() {
+    printf '[penguinbox] %(%H:%M:%S)T passt started\n' -1 >&2
+    local rc=0
+    passt "${passt_args[@]}" || rc=$?
+    printf '[penguinbox] %(%H:%M:%S)T passt exited rc=%d\n' -1 "$rc" >&2
+    return "$rc"
+}
+passt_supervise &
 PASST_PID=$!
 
+# The socket file appears at bind() time, before passt calls listen(). If QEMU
+# connects in that window its stream netdev fails with "Connection refused" and
+# the guest boots without any network. Wait for the listening state instead.
+passt_listening() {
+    ss -xl 2>/dev/null | grep -Fq "$PASST_SOCKET"
+}
 for _ in {1..100}; do
-    [[ -S "$PASST_SOCKET" ]] && break
+    passt_listening && break
     if ! kill -0 "$PASST_PID" 2>/dev/null; then
         [[ -s "$PASST_LOG" ]] && tail -n 20 "$PASST_LOG" >&2
-        die "passt exited before creating ${PASST_SOCKET}"
+        die "passt exited before listening on ${PASST_SOCKET}"
     fi
     sleep 0.1
 done
-[[ -S "$PASST_SOCKET" ]] || die "passt did not create ${PASST_SOCKET}"
+passt_listening || die "passt did not listen on ${PASST_SOCKET}"
 
 log "booting $VM_NAME (accel=$accel, ${CPU_CORES} vCPU, $RAM_SIZE RAM)"
-log "api:      http://127.0.0.1:${HOST_API_PORT}/ (after guest provisioning completes)"
+log "provisioning runs on first boot and after a reset; expect several minutes"
+log "progress: podman logs -f ${VM_NAME} (guest phase lines are mirrored below)"
+log "api:      http://127.0.0.1:${HOST_API_PORT}/health (answers immediately; issues clear when provisioning finishes)"
 if [[ "$ENABLE_VNC" == "1" ]]; then
     log "console:  http://127.0.0.1:${HOST_WEB_PORT}/?autoconnect=1&resize=scale"
+    log "login:    penguinbox / CONSOLE_PASSWORD (default: penguinbox; SSH stays key-only)"
 else
     log "console:  disabled (set ENABLE_VNC=1 to enable noVNC)"
 fi
 if [[ -r "$SSH_KEY" ]]; then
-    log "ssh:      ssh -i ${SSH_KEY} -p ${HOST_SSH_PORT} penguinbox@127.0.0.1"
+    # $SSH_KEY is the container path; operators run ssh on the host, where the
+    # same storage directory is mounted as ./storage by run.sh and compose.yaml.
+    log "ssh:      ssh -i storage/${VM_NAME}/ssh/id_ed25519 -p ${HOST_SSH_PORT} penguinbox@127.0.0.1"
 fi
 log "guest:    ${GUEST_IP}/${GUEST_PREFIX} gateway ${GUEST_GATEWAY} (passt)"
 if [[ -n "$HOST_INTERNAL" ]]; then
@@ -290,6 +372,7 @@ if [[ -n "$HOST_INTERNAL" ]]; then
 fi
 log "storage:  $SHARE_DIR (read-only in guest)"
 
+rm -f "$DATA_DIR/console.log"
 umask 0077
 qemu-system-x86_64 \
     -name "$VM_NAME" \
@@ -299,7 +382,7 @@ qemu-system-x86_64 \
     -m "$RAM_SIZE" \
     -drive "file=${DISK_IMAGE},if=virtio,format=qcow2,cache=writeback" \
     -drive "file=${SEED_ISO},media=cdrom,readonly=on" \
-    -netdev "stream,id=net0,server=off,addr.type=unix,addr.path=${PASST_SOCKET}" \
+    -netdev "stream,id=net0,server=off,addr.type=unix,addr.path=${PASST_SOCKET},reconnect=1" \
     -device "virtio-net-pci,netdev=net0" \
     -virtfs "local,path=${SHARE_DIR},mount_tag=host0,security_model=passthrough,id=host0,multidevs=remap,readonly=on" \
     "${display_args[@]}" \
@@ -308,5 +391,8 @@ qemu-system-x86_64 \
     -qmp "unix:${DATA_DIR}/qmp.sock,server=on,wait=off" \
     -pidfile "${DATA_DIR}/qemu.pid" &
 QEMU_PID=$!
+
+guest_progress &
+PROGRESS_PID=$!
 
 wait "$QEMU_PID"
