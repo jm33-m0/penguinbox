@@ -5,8 +5,10 @@ cd "$(dirname "$0")"
 
 mkdir -p storage
 
+IMAGE=${PENGUINBOX_IMAGE:-localhost/penguinbox:latest}
+
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
-    podman build -t localhost/penguinbox:latest .
+    ./build-image.sh "$IMAGE"
 fi
 
 HOST_SSH_PORT=${HOST_SSH_PORT:-2223}
@@ -40,4 +42,4 @@ if [[ -r /dev/kvm && -w /dev/kvm ]]; then
     args+=(--device /dev/kvm)
 fi
 
-exec podman run "${args[@]}" localhost/penguinbox:latest
+exec podman run "${args[@]}" "$IMAGE"

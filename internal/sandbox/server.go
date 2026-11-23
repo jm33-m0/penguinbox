@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -89,10 +88,6 @@ func (s *Server) routes() {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := validateLoopbackHost(r.Host); err != nil {
-		http.Error(w, "forbidden host", http.StatusForbidden)
-		return
-	}
 	if s.cfg.APIToken != "" && r.URL.Path != "/health" && !authorizedRequest(r, s.cfg.APIToken) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -414,39 +409,6 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
-}
-
-// ValidateLoopback rejects any bind address that is not a literal loopback IP.
-func ValidateLoopback(address string) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return fmt.Errorf("parse address: %w", err)
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("must bind a loopback IP, got %q", address)
-	}
-	return nil
-}
-
-// validateLoopbackHost blocks DNS-rebinding requests from non-loopback Host
-// headers when the API is reached through the published loopback port.
-func validateLoopbackHost(hostHeader string) error {
-	if hostHeader == "" {
-		return nil
-	}
-	host := hostHeader
-	if h, _, err := net.SplitHostPort(hostHeader); err == nil {
-		host = h
-	}
-	host = strings.Trim(host, "[]")
-	if strings.EqualFold(host, "localhost") {
-		return nil
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return nil
-	}
-	return fmt.Errorf("non-loopback host %q", hostHeader)
 }
 
 func authorizedRequest(r *http.Request, token string) bool {

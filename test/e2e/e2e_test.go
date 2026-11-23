@@ -135,7 +135,7 @@ func TestSandboxAPI(t *testing.T) {
 	knownHosts := filepath.Join(root, "storage", "penguinbox", "known_hosts")
 
 	if os.Getenv("PENGUINBOX_E2E_SKIP_BUILD") != "1" {
-		run(t, root, "podman", "build", "-t", "localhost/penguinbox:latest", ".")
+		run(t, root, "./build-image.sh", "localhost/penguinbox:latest")
 	}
 
 	started := ensureBox(t, root)
@@ -256,11 +256,11 @@ func TestSandboxAPI(t *testing.T) {
 	}
 
 	guestListeners := run(t, root, "ssh", append(sshArgs, "ss", "-ltn")...)
-	if !strings.Contains(guestListeners, "127.0.0.1:1338") {
-		t.Fatalf("API is not bound to guest loopback:\n%s", guestListeners)
+	if !strings.Contains(guestListeners, "0.0.0.0:1338") && !strings.Contains(guestListeners, "*:1338") {
+		t.Fatalf("API is not listening on the guest network:\n%s", guestListeners)
 	}
-	if strings.Contains(guestListeners, "0.0.0.0:1338") || strings.Contains(guestListeners, "*:1338") {
-		t.Fatalf("API is exposed beyond guest loopback:\n%s", guestListeners)
+	if strings.Contains(guestListeners, "127.0.0.1:1338") {
+		t.Fatalf("API is still loopback-only; passt cannot reach it:\n%s", guestListeners)
 	}
 	hostListeners := run(t, root, "ss", "-ltn")
 	if !strings.Contains(hostListeners, "127.0.0.1:1338") {

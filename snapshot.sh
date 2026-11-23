@@ -18,7 +18,7 @@ if [[ ! -d storage/penguinbox ]]; then
 fi
 
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
-    podman build -t "$IMAGE" . >/dev/null
+    ./build-image.sh "$IMAGE" >/dev/null
 fi
 
 podman stop penguinbox >/dev/null 2>&1 || true

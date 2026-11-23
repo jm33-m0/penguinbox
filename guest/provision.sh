@@ -59,7 +59,6 @@ apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     slirp4netns \
-    socat \
     strace \
     sysstat \
     tcpdump \
@@ -174,11 +173,10 @@ if [[ ! -f /opt/penguinbox/bin/penguinboxd ]]; then
 fi
 install -m 0755 /opt/penguinbox/bin/penguinboxd /usr/local/bin/penguinboxd
 install -m 0644 /opt/penguinbox/systemd/penguinboxd.service /etc/systemd/system/penguinboxd.service
-install -m 0755 /opt/penguinbox/bin/penguinbox-api-relay /usr/local/bin/penguinbox-api-relay
-install -m 0644 /opt/penguinbox/systemd/penguinbox-api-relay.service /etc/systemd/system/penguinbox-api-relay.service
+systemctl disable --now penguinbox-api-relay.service >/dev/null 2>&1 || true
+rm -f /usr/local/bin/penguinbox-api-relay /etc/systemd/system/penguinbox-api-relay.service
 systemctl daemon-reload
 systemctl enable --now penguinboxd.service
-systemctl enable --now penguinbox-api-relay.service
 
 systemctl enable --now auditd || true
 

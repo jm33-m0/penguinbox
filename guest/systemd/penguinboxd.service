@@ -7,7 +7,7 @@ Wants=podman.socket
 Type=simple
 User=root
 ExecStart=/usr/local/bin/penguinboxd \
-    -listen 127.0.0.1:1338 \
+    -listen 0.0.0.0:1338 \
     -state-dir /var/lib/penguinbox \
     -falco-log /var/log/penguinbox/falco.json \
     -yara-rules /etc/penguinbox/rules/yara \

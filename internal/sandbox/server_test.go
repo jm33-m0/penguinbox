@@ -70,29 +70,6 @@ func uploadTestFile(t *testing.T, srv *Server, name, content string) fileInfo {
 	return response.FileInfo
 }
 
-func TestValidateLoopback(t *testing.T) {
-	tests := []struct {
-		address string
-		ok      bool
-	}{
-		{"127.0.0.1:1338", true},
-		{"[::1]:1338", true},
-		{"0.0.0.0:1338", false},
-		{"192.0.2.1:1338", false},
-		{"localhost:1338", false},
-		{"127.0.0.1", false},
-	}
-	for _, test := range tests {
-		err := ValidateLoopback(test.address)
-		if test.ok && err != nil {
-			t.Errorf("ValidateLoopback(%q) = %v, want nil", test.address, err)
-		}
-		if !test.ok && err == nil {
-			t.Errorf("ValidateLoopback(%q) = nil, want error", test.address)
-		}
-	}
-}
-
 func TestUploadAndStatic(t *testing.T) {
 	srv := testServer(t)
 	info := uploadTestFile(t, srv, "sample.sh", "#!/bin/sh\ncat /proc/self/maps\n")
@@ -211,26 +188,6 @@ func TestResultNotFoundAndInvalidID(t *testing.T) {
 		srv.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusNotFound {
 			t.Errorf("%s %s status = %d, want 404", method, target, recorder.Code)
-		}
-	}
-}
-
-func TestRejectsNonLoopbackHost(t *testing.T) {
-	srv := testServer(t)
-	for _, host := range []string{"evil.example:1338", "192.0.2.1:1338", "example.com"} {
-		request := httptest.NewRequest(http.MethodGet, "http://"+host+"/health", nil)
-		recorder := httptest.NewRecorder()
-		srv.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusForbidden {
-			t.Errorf("host %q status = %d, want 403", host, recorder.Code)
-		}
-	}
-	for _, host := range []string{"127.0.0.1:1338", "[::1]:1338", "localhost:1338"} {
-		request := httptest.NewRequest(http.MethodGet, "http://"+host+"/health", nil)
-		recorder := httptest.NewRecorder()
-		srv.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusOK {
-			t.Errorf("host %q status = %d, want 200", host, recorder.Code)
 		}
 	}
 }

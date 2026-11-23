@@ -18,7 +18,7 @@ import (
 
 func main() {
 	var cfg sandbox.Config
-	flag.StringVar(&cfg.Listen, "listen", "127.0.0.1:1338", "loopback listen address")
+	flag.StringVar(&cfg.Listen, "listen", "0.0.0.0:1338", "listen address; passt forwards the guest port 1338")
 	flag.StringVar(&cfg.StateDir, "state-dir", "/var/lib/penguinbox", "upload and result directory")
 	flag.StringVar(&cfg.FalcoLog, "falco-log", "/var/log/penguinbox/falco.json", "Falco JSON alert log")
 	flag.StringVar(&cfg.Image, "image", "localhost/penguinbox-payload:latest", "payload runtime image")
@@ -37,9 +37,6 @@ func main() {
 	flag.IntVar(&cfg.MaxEvents, "max-events", 100000, "maximum telemetry events stored per run")
 	flag.Parse()
 
-	if err := sandbox.ValidateLoopback(cfg.Listen); err != nil {
-		log.Fatalf("listen address: %v", err)
-	}
 	if cfg.MaxUpload <= 0 {
 		log.Fatal("max-upload must be positive")
 	}

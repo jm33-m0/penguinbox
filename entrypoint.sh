@@ -173,6 +173,9 @@ with open(output, "w", encoding="utf-8") as handle:
 PY
 
 cp "$CLOUD_META" "$META_DATA"
+INSTANCE_ID="${VM_NAME}-$(cat /proc/sys/kernel/random/uuid)"
+sed "s/^instance-id: .*/instance-id: ${INSTANCE_ID}/" "$META_DATA" >"$META_DATA.tmp"
+mv "$META_DATA.tmp" "$META_DATA"
 cloud-localds "$SEED_ISO" "$USER_DATA" "$META_DATA"
 
 VNC_DISPLAY=$((VNC_PORT - 5900))
@@ -269,7 +272,7 @@ done
 [[ -S "$PASST_SOCKET" ]] || die "passt did not create ${PASST_SOCKET}"
 
 log "booting $VM_NAME (accel=$accel, ${CPU_CORES} vCPU, $RAM_SIZE RAM)"
-log "api:      http://127.0.0.1:${HOST_API_PORT}/"
+log "api:      http://127.0.0.1:${HOST_API_PORT}/ (after guest provisioning completes)"
 if [[ "$ENABLE_VNC" == "1" ]]; then
     log "console:  http://127.0.0.1:${HOST_WEB_PORT}/?autoconnect=1&resize=scale"
 else

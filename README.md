@@ -21,6 +21,10 @@ Start the VM (first boot downloads the base image, provisions the guest, and gen
 ./run.sh
 ```
 
+`run.sh` builds `localhost/penguinbox:latest` only when its inputs changed (`Dockerfile`, `.dockerignore`, Go sources, `entrypoint.sh`, `cloud-init/`, `guest/`); the input hash is stored in the image label `org.penguinbox.build-inputs`. Set `SKIP_BUILD=1` to bypass the check.
+
+First boot takes several minutes (package installs and the payload image build) and runs in the foreground. The sandbox API is reachable only after guest provisioning finishes. Each container start generates a new cloud-init `instance-id`, so an interrupted first boot is reapplied on the next start instead of being skipped. Check progress with `systemctl status penguinbox-provision.service` inside the guest.
+
 Connect over SSH:
 
 ```sh
