@@ -121,10 +121,13 @@ if [[ -z "$SSH_PUBLIC_KEY" ]]; then
         ssh-keygen -q -t ed25519 -N '' -C "$VM_NAME" -f "$SSH_KEY"
     else
         log "reusing guest SSH key: $SSH_KEY"
+        if [[ ! -s "$SSH_KEY.pub" ]]; then
+            ssh-keygen -y -f "$SSH_KEY" >"$SSH_KEY.pub"
+        fi
     fi
     chmod 0600 "$SSH_KEY"
     chmod 0644 "$SSH_KEY.pub"
-    SSH_PUBLIC_KEY=$(cat "$SSH_KEY.pub")
+    SSH_PUBLIC_KEY=$(ssh-keygen -y -f "$SSH_KEY")
 else
     log "using provided SSH_PUBLIC_KEY for guest authorization"
     if [[ ! -r "$SSH_KEY" ]]; then

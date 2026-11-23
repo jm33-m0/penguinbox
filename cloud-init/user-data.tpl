@@ -14,6 +14,7 @@ users:
     ssh_authorized_keys:
       - __SSH_PUBLIC_KEY__
 ssh_pwauth: false
+ssh_deletekeys: false
 disable_root: true
 write_files:
   - path: /opt/penguinbox/provision.sh
@@ -43,6 +44,8 @@ write_files:
       [Install]
       WantedBy=multi-user.target
 runcmd:
+  - [ install, -d, -m, '0700', -o, penguinbox, -g, penguinbox, /home/penguinbox/.ssh ]
+  - [ bash, -c, 'printf "%s\n" "$1" >/home/penguinbox/.ssh/authorized_keys && chown penguinbox:penguinbox /home/penguinbox/.ssh/authorized_keys && chmod 0600 /home/penguinbox/.ssh/authorized_keys', --, __SSH_PUBLIC_KEY__ ]
   - [ systemctl, daemon-reload ]
   - [ systemctl, enable, --now, penguinbox-provision.service ]
 final_message: "PenguinBox boot complete; provisioning state: systemctl status penguinbox-provision.service"

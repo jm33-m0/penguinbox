@@ -108,9 +108,9 @@ fi
 
 systemctl daemon-reload
 if [[ -f /usr/lib/systemd/system/falco-modern-bpf.service ]]; then
-    systemctl enable --now falco-modern-bpf.service
+    systemctl enable --now falco-modern-bpf.service || true
 elif [[ -f /usr/lib/systemd/system/falco.service ]]; then
-    systemctl enable --now falco.service
+    systemctl enable --now falco.service || true
 else
     cat >/etc/systemd/system/penguinbox-falco.service <<'EOF'
 [Unit]
@@ -128,12 +128,12 @@ RestartSec=5s
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
-    systemctl enable --now penguinbox-falco.service
+    systemctl enable --now penguinbox-falco.service || true
 fi
 systemctl is-active falco-modern-bpf.service >/dev/null 2>&1 ||
     systemctl is-active falco.service >/dev/null 2>&1 ||
     systemctl is-active penguinbox-falco.service >/dev/null 2>&1 ||
-    echo "penguinbox: warning: falco is not active; inspect journalctl -u falco"
+    echo "penguinbox: warning: falco is not active; inspect journalctl -u falco-modern-bpf"
 
 echo "penguinbox: installing tracee"
 TRACEE_VERSION=v0.24.1
@@ -173,10 +173,9 @@ if [[ ! -f /opt/penguinbox/bin/penguinboxd ]]; then
 fi
 install -m 0755 /opt/penguinbox/bin/penguinboxd /usr/local/bin/penguinboxd
 install -m 0644 /opt/penguinbox/systemd/penguinboxd.service /etc/systemd/system/penguinboxd.service
-systemctl disable --now penguinbox-api-relay.service >/dev/null 2>&1 || true
-rm -f /usr/local/bin/penguinbox-api-relay /etc/systemd/system/penguinbox-api-relay.service
 systemctl daemon-reload
-systemctl enable --now penguinboxd.service
+systemctl enable penguinboxd.service
+systemctl restart penguinboxd.service
 
 systemctl enable --now auditd || true
 
