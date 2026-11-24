@@ -1,3 +1,9 @@
+/*
+ * Minimal string-based sample rules. They exercise the YARA API and the rule
+ * inventory; component artifact signatures live in penguinbox_agent.yar and
+ * match compiled code and ELF metadata.
+ */
+
 rule PenguinBox_ProcMaps
 {
     meta:

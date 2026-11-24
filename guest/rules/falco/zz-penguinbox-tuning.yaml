@@ -1,0 +1,26 @@
+# Local tuning for rules shipped by the upstream Falco rulesets.
+#
+# These rules describe the sandbox harness or duplicate a container-scoped
+# PenguinBox EDR rule. They are disabled here instead of editing the vendored
+# files, so upstream updates remain mergeable. Keep this file last in load
+# order (the zz- prefix).
+
+- rule: Launch Sensitive Mount Container
+  override:
+    enabled: replace
+  enabled: false
+
+- rule: BPF Program Not Profiled
+  override:
+    enabled: replace
+  enabled: false
+
+- rule: Change thread namespace
+  override:
+    enabled: replace
+  enabled: false
+
+- rule: Change namespace privileges via unshare
+  override:
+    enabled: replace
+  enabled: false

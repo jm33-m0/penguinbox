@@ -1,0 +1,306 @@
+# PenguinBox EDR behavioral profile.
+#
+# The profile models the behaviour mainstream Linux EDR products report from a
+# container: process injection, fileless execution, persistence, credential
+# access, defense evasion, container escape, kernel tampering, and reverse
+# shell/C2 patterns. Stable Falco rules remain loaded from the package; the
+# incubating and sandbox rulesets are not shipped because their Kubernetes and
+# host-audit assumptions produce ambient noise here.
+#
+# Every rule is container-scoped and excludes the sandbox control plane. A rule
+# that matches the container runtime, the collectors, or penguinboxd is a bug,
+# not a payload detection.
+
+- list: pb_control_plane
+  items: [crun, runc, conmon, podman, pasta, dockerd, containerd, containerd-shim, penguinboxd, falco, tracee, systemd, sshd, dbus-daemon]
+
+- list: pb_shells
+  items: [sh, bash, dash, zsh, ksh, ash, busybox, csh, tcsh]
+
+- list: pb_interpreters
+  items: [python, python3, perl, ruby, php, node, deno, lua, awk, gawk]
+
+- list: pb_runtime_sockets
+  items: [/var/run/docker.sock, /run/docker.sock, /run/podman/podman.sock, /run/containerd/containerd.sock, /run/crio/crio.sock]
+
+- macro: pb_container
+  condition: container.id != host and container.id != ""
+
+- macro: pb_payload
+  condition: pb_container and not proc.name in (pb_control_plane)
+
+- macro: pb_exec
+  condition: evt.type in (execve, execveat)
+
+- macro: pb_open_write
+  condition: evt.type in (open, openat, openat2, creat) and evt.is_open_write=true
+
+- macro: pb_writable_exec
+  condition: proc.exepath startswith /tmp/ or proc.exepath startswith /var/tmp/ or proc.exepath startswith /dev/shm/ or proc.exepath startswith /home/ or proc.exepath startswith /root/
+
+# ------------------------------------------------------------------ discovery
+
+- rule: PenguinBox EDR - Process Memory Map Read
+  desc: A container process opened another process memory map.
+  condition: >
+    pb_payload
+    and evt.type in (open, openat, openat2)
+    and evt.is_open_read=true
+    and fd.name contains /proc/
+    and fd.name endswith /maps
+  output: "memory map read container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name"
+  priority: WARNING
+  tags: [penguinbox, edr, discovery, mitre_discovery, T1057]
+
+- rule: PenguinBox EDR - Proc Mount or Network Enumeration
+  desc: A container process enumerated mount or network state through procfs.
+  condition: >
+    pb_payload
+    and evt.type in (open, openat, openat2)
+    and evt.is_open_read=true
+    and (fd.name glob /proc/*/mounts or fd.name glob /proc/*/mountinfo or fd.name glob /proc/*/net/*)
+  output: "proc enumeration container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name"
+  priority: NOTICE
+  tags: [penguinbox, edr, discovery, mitre_discovery, T1082]
+
+# ------------------------------------------------------------------ execution
+
+- rule: PenguinBox EDR - Shell Spawned in Container
+  desc: A shell was started inside the payload container.
+  condition: pb_exec and pb_payload and (proc.name in (pb_shells) or proc.exepath in (/bin/sh, /usr/bin/sh, /bin/bash, /usr/bin/bash, /bin/dash, /usr/bin/dash, /bin/zsh, /usr/bin/zsh))
+  output: "shell spawned container_id=%container.id pid=%proc.pid proc=%proc.name ppid=%proc.ppid parent=%proc.pname cmd=%proc.cmdline"
+  priority: WARNING
+  tags: [penguinbox, edr, execution, mitre_execution, T1059.004]
+
+- rule: PenguinBox EDR - Inline Interpreter Execution
+  desc: An interpreter was started with inline code.
+  condition: >
+    pb_exec
+    and pb_payload
+    and proc.name in (pb_interpreters)
+    and (proc.cmdline contains " -c " or proc.cmdline contains " -e " or proc.cmdline contains " -r " or proc.cmdline contains " -Command " or proc.cmdline contains " -EncodedCommand ")
+  output: "inline interpreter container_id=%container.id pid=%proc.pid proc=%proc.name cmd=%proc.cmdline"
+  priority: WARNING
+  tags: [penguinbox, edr, execution, mitre_execution, T1059]
+
+- rule: PenguinBox EDR - Execution From Writable Path
+  desc: A container process executed a file from a writable path.
+  condition: pb_exec and pb_payload and pb_writable_exec
+  output: "writable exec container_id=%container.id pid=%proc.pid proc=%proc.name exe=%proc.exepath cmd=%proc.cmdline"
+  priority: ERROR
+  tags: [penguinbox, edr, execution, mitre_execution, T1204]
+
+- rule: PenguinBox EDR - Network Response Piped to Shell
+  desc: A shell command piped downloaded or decoded content to a shell.
+  condition: >
+    pb_exec
+    and pb_payload
+    and proc.name in (pb_shells)
+    and (proc.cmdline contains "curl " or proc.cmdline contains "wget " or proc.cmdline contains "base64 -d" or proc.cmdline contains "nc ")
+  output: "pipe to shell container_id=%container.id pid=%proc.pid proc=%proc.name cmd=%proc.cmdline"
+  priority: ERROR
+  tags: [penguinbox, edr, execution, mitre_execution, T1059.004]
+
+# ------------------------------------------------------ injection and memory
+
+- rule: PenguinBox EDR - Memfd Created
+  desc: A container process created an anonymous executable backing file.
+  condition: evt.type=memfd_create and pb_payload
+  output: "memfd container_id=%container.id pid=%proc.pid proc=%proc.name"
+  priority: WARNING
+  tags: [penguinbox, edr, defense_evasion, mitre_defense_evasion, T1620]
+
+- rule: PenguinBox EDR - Cross Process Memory Access
+  desc: A container process read or wrote another process address space.
+  condition: pb_payload and evt.type in (process_vm_readv, process_vm_writev)
+  output: "process memory access container_id=%container.id pid=%proc.pid proc=%proc.name op=%evt.type"
+  priority: ERROR
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1055]
+
+- rule: PenguinBox EDR - Process Memory Write Via Procfs
+  desc: A container process opened another process memory file for writing.
+  condition: pb_payload and pb_open_write and fd.name glob /proc/*/mem
+  output: "procfs memory write container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name"
+  priority: ERROR
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1055]
+
+- rule: PenguinBox EDR - Anonymous Executable Memory
+  desc: A container process mapped anonymous memory with execute permission.
+  condition: >
+    pb_payload
+    and ((evt.type=mmap and evt.arg.prot contains PROT_EXEC and evt.arg.flags contains MAP_ANONYMOUS) or evt.type=mprotect and evt.arg.prot contains PROT_EXEC)
+  output: "executable memory container_id=%container.id pid=%proc.pid proc=%proc.name op=%evt.type prot=%evt.arg.prot flags=%evt.arg.flags"
+  priority: WARNING
+  tags: [penguinbox, edr, defense_evasion, mitre_defense_evasion, T1620]
+
+- rule: PenguinBox EDR - LD_PRELOAD Injection
+  desc: A container process started with LD_PRELOAD set.
+  condition: >
+    pb_exec
+    and pb_payload
+    and proc.env[LD_PRELOAD] exists
+    and proc.env[LD_PRELOAD] != ""
+  output: "ld_preload container_id=%container.id pid=%proc.pid proc=%proc.name preload=%proc.env[LD_PRELOAD] cmd=%proc.cmdline"
+  priority: WARNING
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1574.006]
+
+# --------------------------------------------------------------- persistence
+
+- rule: PenguinBox EDR - Systemd Persistence
+  desc: A container process created or modified a systemd unit.
+  condition: >
+    pb_payload
+    and pb_open_write
+    and (fd.name startswith /etc/systemd/system or fd.name startswith /usr/lib/systemd/system or fd.name startswith /etc/systemd/user or (fd.name startswith /home/ and fd.name contains "/.config/systemd/"))
+  output: "systemd persistence container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name"
+  priority: ERROR
+  tags: [penguinbox, edr, persistence, mitre_persistence, T1543.002]
+
+- rule: PenguinBox EDR - Dynamic Loader Preload Persistence
+  desc: A container process modified the dynamic loader preload configuration.
+  condition: >
+    pb_payload
+    and pb_open_write
+    and (fd.name = /etc/ld.so.preload or fd.name startswith /etc/ld.so.conf.d/)
+  output: "loader preload persistence container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name"
+  priority: CRITICAL
+  tags: [penguinbox, edr, persistence, mitre_persistence, T1574.006]
+
+- rule: PenguinBox EDR - Init Script Persistence
+  desc: A container process modified an init script.
+  condition: >
+    pb_payload
+    and pb_open_write
+    and (fd.name startswith /etc/init.d/ or fd.name = /etc/rc.local or fd.name startswith /etc/rc)
+  output: "init persistence container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name"
+  priority: WARNING
+  tags: [penguinbox, edr, persistence, mitre_persistence, T1037]
+
+- rule: PenguinBox EDR - Authentication File Modification
+  desc: A container process modified an authentication database or policy file.
+  condition: >
+    pb_payload
+    and pb_open_write
+    and (fd.name in (/etc/passwd, /etc/shadow, /etc/gshadow, /etc/sudoers, /etc/ssh/sshd_config) or fd.name startswith /etc/sudoers.d/ or fd.name startswith /etc/pam.d/)
+  output: "authentication modification container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name"
+  priority: CRITICAL
+  tags: [penguinbox, edr, persistence, mitre_persistence, T1136]
+
+# ---------------------------------------------------------- defense evasion
+
+- rule: PenguinBox EDR - Log Tampering
+  desc: A container process deleted, renamed, or truncated system logs.
+  condition: >
+    pb_payload
+    and ((evt.type in (unlink, unlinkat, rename, renameat, renameat2, truncate, ftruncate)
+          and (evt.arg.path startswith /var/log/ or fd.name startswith /var/log/ or evt.arg.path startswith /run/log/ or fd.name startswith /run/log/))
+         or (pb_open_write and evt.arg.flags contains O_TRUNC
+             and (fd.name startswith /var/log/ or fd.name startswith /run/log/)))
+  output: "log tampering container_id=%container.id pid=%proc.pid proc=%proc.name file=%fd.name path=%evt.arg.path op=%evt.type"
+  priority: ERROR
+  tags: [penguinbox, edr, defense_evasion, mitre_defense_evasion, T1070.002]
+
+- rule: PenguinBox EDR - Security Control Tampering
+  desc: A container process attempted to disable a security control.
+  condition: >
+    pb_exec
+    and pb_payload
+    and (proc.cmdline contains "setenforce 0" or proc.cmdline contains "apparmor_parser -R" or proc.cmdline contains "iptables -F" or proc.cmdline contains "ufw disable" or proc.cmdline contains "auditctl -e 0")
+  output: "security control tampering container_id=%container.id pid=%proc.pid proc=%proc.name cmd=%proc.cmdline"
+  priority: ERROR
+  tags: [penguinbox, edr, defense_evasion, mitre_defense_evasion, T1562]
+
+- rule: PenguinBox EDR - Self Deletion
+  desc: A container process attempted to delete its own executable.
+  condition: pb_payload and evt.type in (unlink, unlinkat) and (evt.arg.path = /proc/self/exe or fd.name = /proc/self/exe)
+  output: "self deletion container_id=%container.id pid=%proc.pid proc=%proc.name"
+  priority: WARNING
+  tags: [penguinbox, edr, defense_evasion, mitre_defense_evasion, T1070.004]
+
+# ------------------------------------------------------- container and kernel
+
+- rule: PenguinBox EDR - Namespace Escape Attempt
+  desc: A container process changed or created a namespace.
+  condition: pb_payload and evt.type in (setns, unshare)
+  output: "namespace change container_id=%container.id pid=%proc.pid proc=%proc.name op=%evt.type"
+  priority: ERROR
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1611]
+
+- rule: PenguinBox EDR - Mount In Container
+  desc: A container process mounted or unmounted a filesystem.
+  condition: pb_payload and evt.type in (mount, umount2)
+  output: "mount container_id=%container.id pid=%proc.pid proc=%proc.name op=%evt.type"
+  priority: ERROR
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1611]
+
+- rule: PenguinBox EDR - Runtime Socket Access
+  desc: A container process opened a container runtime socket.
+  condition: pb_payload and evt.type in (open, openat, openat2, connect) and fd.name in (pb_runtime_sockets)
+  output: "runtime socket container_id=%container.id pid=%proc.pid proc=%proc.name socket=%fd.name"
+  priority: CRITICAL
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1611]
+
+- rule: PenguinBox EDR - Host Root Via Procfs
+  desc: A container process accessed the host root through /proc/1/root.
+  condition: pb_payload and evt.type in (open, openat, openat2, stat, lstat, newfstatat) and (fd.name startswith /proc/1/root or evt.arg.path startswith /proc/1/root)
+  output: "host root access container_id=%container.id pid=%proc.pid proc=%proc.name path=%fd.name"
+  priority: CRITICAL
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1611]
+
+- rule: PenguinBox EDR - Namespace Enter Tool
+  desc: A container process started nsenter.
+  condition: pb_exec and pb_payload and proc.name=nsenter
+  output: "nsenter container_id=%container.id pid=%proc.pid proc=%proc.name cmd=%proc.cmdline"
+  priority: CRITICAL
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1611]
+
+- rule: PenguinBox EDR - BPF Program Load
+  desc: A container process loaded a BPF program.
+  condition: pb_payload and evt.type=bpf and (evt.arg.cmd=5 or evt.arg.cmd=BPF_PROG_LOAD)
+  output: "bpf load container_id=%container.id pid=%proc.pid proc=%proc.name cmd=%evt.arg.cmd"
+  priority: ERROR
+  tags: [penguinbox, edr, privilege_escalation, mitre_privilege_escalation, T1611]
+
+- rule: PenguinBox EDR - Kernel Image Load
+  desc: A container process attempted a kexec load.
+  condition: pb_payload and evt.type in (kexec_load, kexec_file_load)
+  output: "kexec container_id=%container.id pid=%proc.pid proc=%proc.name op=%evt.type"
+  priority: CRITICAL
+  tags: [penguinbox, edr, impact, mitre_impact, T1601]
+
+- rule: PenguinBox EDR - System Reboot
+  desc: A container process attempted a reboot.
+  condition: pb_payload and evt.type=reboot
+  output: "reboot container_id=%container.id pid=%proc.pid proc=%proc.name"
+  priority: CRITICAL
+  tags: [penguinbox, edr, impact, mitre_impact, T1529]
+
+- rule: PenguinBox EDR - Kernel Module Removal
+  desc: A container process attempted to unload a kernel module.
+  condition: pb_payload and evt.type=delete_module
+  output: "module removal container_id=%container.id pid=%proc.pid proc=%proc.name"
+  priority: ERROR
+  tags: [penguinbox, edr, defense_evasion, mitre_defense_evasion, T1562.001]
+
+# --------------------------------------------------------- privilege and C2
+
+- rule: PenguinBox EDR - Reverse Shell
+  desc: A shell inside the container opened a network connection.
+  condition: pb_payload and proc.name in (pb_shells) and evt.type in (connect, dup2, dup3)
+  output: "reverse shell container_id=%container.id pid=%proc.pid proc=%proc.name op=%evt.type fd=%fd.name"
+  priority: ERROR
+  tags: [penguinbox, edr, command_and_control, mitre_command_and_control, T1059.004]
+
+- rule: PenguinBox EDR - Bind Shell
+  desc: A shell inside the container listened on a socket.
+  condition: pb_payload and proc.name in (pb_shells) and evt.type=listen
+  output: "bind shell container_id=%container.id pid=%proc.pid proc=%proc.name fd=%fd.name"
+  priority: ERROR
+  tags: [penguinbox, edr, command_and_control, mitre_command_and_control, T1059.004]
+
+- rule: PenguinBox EDR - Connection From Writable Executable
+  desc: A process running from a writable path opened a network connection.
+  condition: pb_payload and evt.type=connect and pb_writable_exec
+  output: "writable connect container_id=%container.id pid=%proc.pid proc=%proc.name exe=%proc.exepath dst=%fd.name"
+  priority: ERROR
+  tags: [penguinbox, edr, command_and_control, mitre_command_and_control, T1095]

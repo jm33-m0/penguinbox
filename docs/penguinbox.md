@@ -124,8 +124,8 @@ The guest host key is recorded on first use in `storage/penguinbox/known_hosts` 
 
 ### Custom rules
 
-- **Static YARA (`/etc/penguinbox/rules/yara`):** `penguinboxd` evaluates every `.yar` and `.yara` file against uploaded artifacts and returns matches under `results.yara.matches`. Sample: `guest/rules/yara/penguinbox.yar`.
-- **Behavioral Falco (`/etc/penguinbox/rules/falco`):** Falco includes and watches this directory. Matching alerts appear in `findings.events` with `collector=falco` and the rule name. Ships with `guest/rules/falco/penguinbox-custom.yaml` and the upstream Apache-2.0 `falcosecurity/rules` incubating (`falco-incubating_rules.yaml`, `falco-incubating-rules-6.0.1`) and sandbox (`falco-sandbox_rules.yaml`, `falco-sandbox-rules-6.2.0`) rulesets.
+- **Static YARA (`/etc/penguinbox/rules/yara`):** `penguinboxd` evaluates every `.yar` and `.yara` file against uploaded artifacts and returns matches under `results.yara.matches`. Ships with the sample `penguinbox.yar` and `penguinbox_agent.yar`, which contains static signatures for Linux C agent and stager artifacts.
+- **Behavioral Falco (`/etc/penguinbox/rules/falco`):** Falco includes and watches this directory. Matching alerts appear in `findings.events` with `collector=falco` and the rule name. Ships with `penguinbox_edr.yaml`, a curated container EDR profile covering execution, injection and memory, persistence, credential access, defense evasion, container escape, kernel tampering, and C2 behaviour; the upstream Apache-2.0 `falcosecurity/rules` incubating and sandbox rulesets; and `zz-penguinbox-tuning.yaml`, which disables the upstream rules that describe the sandbox harness or duplicate a PenguinBox rule. The stable Falco ruleset is loaded from the package. Operators can add rule files to the directory.
 
 Add or replace files in the guest rule directories; no image rebuild is needed.
 
@@ -133,7 +133,7 @@ Add or replace files in the guest rule directories; no image rebuild is needed.
 
 ### Tracee
 
-Tracee attaches eBPF programs to Linux syscalls and LSM hooks and emits JSON events. `penguinboxd` keeps a single Tracee instance running with `-tracee-events default,openat` by default (`-tracee-events syscalls` captures every syscall).
+Tracee attaches eBPF programs to Linux syscalls and LSM hooks and emits JSON events. `penguinboxd` keeps a single Tracee instance running with the events the EDR profile grades: the Tracee default set plus `openat`, `openat2`, `mmap`, `mprotect`, `connect`, `listen`, `execve`, `execveat`, file mutation syscalls, mount/umount, `unshare`, `bpf`, kexec, and module unload (`-tracee-events syscalls` captures every syscall).
 
 For manual captures inside the guest, `penguinbox-tracee` wraps Tracee with syscall, process-exec, shared-object load, and file/socket security events, plus executed-binary capture:
 
@@ -158,7 +158,7 @@ Tracee observes Linux syscalls and LSM hooks (including `mmap`, `mprotect`, `mem
 
 Falco is a rule engine that emits matching alerts only (not a full event stream). Its drop-in configuration uses the `modern_ebpf` driver and writes JSON alerts to `/var/log/penguinbox/falco.json`.
 
-The Falco log records alerts across all containers in the VM; `penguinboxd` filters it by run window and container ID. Built-in PenguinBox rules cover container exec, shell spawns, execution from writable paths, `memfd_create`, `ptrace`, `/proc/*/maps` reads, outbound connects, kernel module loads, and namespace or mount changes.
+The Falco log records alerts across all containers in the VM; `penguinboxd` filters it by run window and container ID. The PenguinBox EDR profile covers shell and interpreter execution, execution from writable paths, memfd and anonymous executable memory, cross-process memory access, `LD_PRELOAD`, cron/systemd/profile/SSH-key persistence, authentication and loader configuration changes, log and history tampering, namespace and mount changes, runtime socket access, BPF/kexec/reboot, setuid bits, reverse and bind shells, metadata access, and writable-path network connections. The profile excludes the sandbox control plane so container-runtime and collector activity is not reported as payload behavior.
 
 ## Configuration
 
@@ -204,7 +204,7 @@ The Falco log records alerts across all containers in the VM; `penguinboxd` filt
 | `-host-alias-file` | `/mnt/penguinbox/host-internal` | File containing the host IP for `host.containers.internal` |
 | `-tracee` | `/usr/local/bin/tracee` | Tracee binary path |
 | `-tracee-helper` | `/usr/local/bin/penguinbox-tracee` | Tracee wrapper script path |
-| `-tracee-events` | `default,openat` | Tracee event set (`syscalls` captures every syscall) |
+| `-tracee-events` | `default,openat,openat2,mmap,mprotect,connect,listen,execve,execveat,unlink,unlinkat,rename,renameat,renameat2,truncate,ftruncate,mount,umount2,unshare,bpf,kexec_load,kexec_file_load,delete_module` | Tracee event set (`syscalls` captures every syscall) |
 | `-yara` | `/usr/bin/yara` | YARA binary path |
 | `-yara-rules` | `/etc/penguinbox/rules/yara` | Custom YARA rule directory |
 | `-falco-rules` | `/etc/penguinbox/rules/falco` | Custom Falco rule directory |
@@ -285,4 +285,4 @@ Smoke-test telemetry inside the guest:
 sudo podman run --rm localhost/penguinbox-payload:latest /bin/sh -c 'id; cat /proc/self/maps >/dev/null'
 ```
 
-Falco should emit a container-exec or proc-maps alert in `/var/log/penguinbox/falco.json`, and Tracee should record the corresponding syscalls. If either source is silent, inspect `journalctl -u falco-modern-bpf` and `journalctl -u penguinboxd` before trusting a clean result.
+Falco should emit a shell or process-map alert in `/var/log/penguinbox/falco.json`, and Tracee should record the corresponding syscalls. If either source is silent, inspect `journalctl -u falco-modern-bpf` and `journalctl -u penguinboxd` before trusting a clean result.

@@ -245,7 +245,7 @@ func TestSandboxAPI(t *testing.T) {
 	if !hasCollector(dynamic.Findings.Events, "tracee") {
 		t.Fatal("dynamic events have no tracee collector")
 	}
-	if !hasFalcoRule(dynamic.Findings.Events, "PenguinBox custom proc maps read") {
+	if !hasFalcoRule(dynamic.Findings.Events, "PenguinBox EDR - Process Memory Map Read") {
 		t.Fatal("custom behavioral rule did not fire")
 	}
 

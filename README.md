@@ -67,8 +67,8 @@ Dynamic runs execute inside a fixed Podman image with a read-only root filesyste
 
 ## Custom rules
 
-- Static YARA: `guest/rules/yara/` (installed to `/etc/penguinbox/rules/yara`, sample: `penguinbox.yar`).
-- Behavioral Falco: `guest/rules/falco/` (installed to `/etc/penguinbox/rules/falco`, includes `penguinbox-custom.yaml` plus upstream `falcosecurity/rules` incubating and sandbox rulesets).
+- Static YARA: `guest/rules/yara/` (installed to `/etc/penguinbox/rules/yara`, includes the sample `penguinbox.yar` and the Linux agent/stager signatures in `penguinbox_agent.yar`).
+- Behavioral Falco: `guest/rules/falco/` (installed to `/etc/penguinbox/rules/falco`, ships the curated `penguinbox_edr.yaml` container EDR profile, the upstream `falcosecurity/rules` incubating and sandbox rulesets, and `zz-penguinbox-tuning.yaml` for the few upstream rules that describe the sandbox harness). Stable Falco rules are loaded from the package; operator rule files can be added to the same directory.
 
 Add or edit files in the guest rule directories; the next analysis picks them up without rebuilding the image.
 

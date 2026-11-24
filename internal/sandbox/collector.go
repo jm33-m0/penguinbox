@@ -33,6 +33,13 @@ type collectedEvent struct {
 	raw         json.RawMessage
 }
 
+// DefaultTraceeEvents selects the syscall and LSM events the EDR profile
+// grades. The default set already includes memfd_create, ptrace, setns,
+// process_vm_*, chmod, init_module, exec, and LSM socket hooks; these explicit
+// additions cover file, memory, mount, namespace, BPF, kexec, and module
+// operations that the findings reader uses.
+const DefaultTraceeEvents = "default,openat,openat2,mmap,mprotect,connect,listen,execve,execveat,unlink,unlinkat,rename,renameat,renameat2,truncate,ftruncate,mount,umount2,unshare,bpf,kexec_load,kexec_file_load,delete_module"
+
 func newTraceBuffer(capacity int) *traceBuffer {
 	capacity = max(capacity, 1)
 	return &traceBuffer{
@@ -119,7 +126,7 @@ func (c *traceCollector) start() error {
 	}
 	events := strings.TrimSpace(c.cfg.TraceeEvents)
 	if events == "" {
-		events = "default,openat"
+		events = DefaultTraceeEvents
 	}
 	args := []string{
 		"--output", "json",

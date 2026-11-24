@@ -28,7 +28,7 @@ func main() {
 	flag.StringVar(&cfg.HostAliasFile, "host-alias-file", "/mnt/penguinbox/host-internal", "file with the Podman host address behind host.containers.internal")
 	flag.StringVar(&cfg.Tracee, "tracee", "/usr/local/bin/tracee", "Tracee binary")
 	flag.StringVar(&cfg.TraceeHelper, "tracee-helper", "/usr/local/bin/penguinbox-tracee", "Tracee wrapper")
-	flag.StringVar(&cfg.TraceeEvents, "tracee-events", "default,openat", "Tracee event selection; use syscalls for every syscall")
+	flag.StringVar(&cfg.TraceeEvents, "tracee-events", sandbox.DefaultTraceeEvents, "Tracee event selection; use syscalls for every syscall")
 	flag.StringVar(&cfg.YARA, "yara", "/usr/bin/yara", "YARA binary")
 	flag.StringVar(&cfg.YARARules, "yara-rules", "/etc/penguinbox/rules/yara", "custom YARA rule directory")
 	flag.StringVar(&cfg.FalcoRules, "falco-rules", "/etc/penguinbox/rules/falco", "custom Falco behavioral rule directory")

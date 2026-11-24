@@ -117,6 +117,10 @@ apt-get install -y --no-install-recommends falco
 
 install -d -m 0755 /etc/falco/config.d /etc/falco/rules.d
 install -d -m 0755 /etc/penguinbox/rules/yara /etc/penguinbox/rules/falco
+# Remove rule files from older profiles so an upgraded guest does not load a
+# duplicate or an ambient-noise ruleset next to the curated EDR profile.
+rm -f /etc/falco/rules.d/99-penguinbox.yaml
+rm -f /etc/penguinbox/rules/falco/penguinbox-custom.yaml
 if [[ -d /opt/penguinbox/rules/yara ]]; then
     cp -a /opt/penguinbox/rules/yara/. /etc/penguinbox/rules/yara/
 fi
@@ -125,9 +129,6 @@ if [[ -d /opt/penguinbox/rules/falco ]]; then
 fi
 if [[ -f /opt/penguinbox/falco/penguinbox.yaml ]]; then
     install -m 0644 /opt/penguinbox/falco/penguinbox.yaml /etc/falco/config.d/99-penguinbox.yaml
-fi
-if [[ -f /opt/penguinbox/falco/penguinbox_rules.yaml ]]; then
-    install -m 0644 /opt/penguinbox/falco/penguinbox_rules.yaml /etc/falco/rules.d/99-penguinbox.yaml
 fi
 
 systemctl daemon-reload
