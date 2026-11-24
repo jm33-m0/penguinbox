@@ -160,6 +160,8 @@ Falco is a rule engine that emits matching alerts only (not a full event stream)
 
 The Falco log records alerts across all containers in the VM; `penguinboxd` filters it by run window and container ID. The PenguinBox EDR profile covers shell and interpreter execution, execution from writable paths, memfd and anonymous executable memory, cross-process memory access, `LD_PRELOAD`, cron/systemd/profile/SSH-key persistence, authentication and loader configuration changes, log and history tampering, namespace and mount changes, runtime socket access, BPF/kexec/reboot, setuid bits, reverse and bind shells, metadata access, and writable-path network connections. The profile excludes the sandbox control plane so container-runtime and collector activity is not reported as payload behavior.
 
+The dynamic result is the legacy LitterBox document consumed by the lab protocol. `findings.events` carries `collector=falco` alerts with `rule`, `priority`, and `output_fields`, and `collector=tracee` events with `eventName`, process and container identity, and syscall/LSM arguments. Falco priorities normalize to `critical`, `high`, `medium`, or `info`; the rule name is the stable detection vocabulary, while the native `evt.type` supplies the event category. `coverage` lists `tracee` and `falco` as expected sensors; a run with no events from either source is incomplete.
+
 ## Configuration
 
 ### Environment variables
