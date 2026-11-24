@@ -51,6 +51,8 @@ Discard guest state and boot a clean overlay (reverts to `golden.qcow2` if prese
 ./reset.sh
 ```
 
+`reset.sh` runs the same image build check as `run.sh`, so changed `guest/` rules, `cloud-init/`, or `penguinboxd` sources rebuild the image before the guest is recreated. A `golden.qcow2` snapshot is a frozen disk and does not pick up rebuilt image inputs: delete `storage/penguinbox/golden.qcow2` to force a full reprovision, or boot the rebuilt image and run `./snapshot.sh` again.
+
 ## Sandbox API
 
 `penguinboxd` implements the LitterBox HTTP API:

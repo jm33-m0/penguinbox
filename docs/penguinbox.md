@@ -239,7 +239,9 @@ storage/penguinbox/
 
 `./snapshot.sh` stops the VM, flattens the provisioned disk into `storage/penguinbox/golden.qcow2`, creates a fresh run overlay backed by the golden image, and restarts the VM.
 
-`./reset.sh` stops the VM and removes the run overlay, seed, console log, `known_hosts`, and `share/`. On the next boot, `entrypoint.sh` creates a new overlay backed by `golden.qcow2` if present (fast reset), or by `base.img` (full reprovision). Delete `storage/penguinbox/golden.qcow2` to return to base-image resets.
+`./reset.sh` stops the VM and removes the run overlay, seed, console log, `known_hosts`, and `share/`. It runs `run.sh`'s image build check, so changed `Dockerfile`, Go sources, `entrypoint.sh`, `cloud-init/`, or `guest/` files rebuild `localhost/penguinbox:latest` before the guest is recreated. On the next boot, `entrypoint.sh` creates a new overlay backed by `golden.qcow2` if present (fast reset), or by `base.img` (full reprovision). Delete `storage/penguinbox/golden.qcow2` to return to base-image resets.
+
+A golden snapshot is a frozen guest disk. Rebuilding the image does not change it, so after changing guest rules or `penguinboxd`, delete `golden.qcow2` before `./reset.sh` for a full reprovision, or boot the rebuilt image and run `./snapshot.sh` again.
 
 ## Container lifecycle
 
